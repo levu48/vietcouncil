@@ -17,16 +17,45 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up SSH key
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DROPLET_HOST: ${{ secrets.DROPLET_HOST }}
         run: |
+          set -euo pipefail
+          if [ -z "${DEPLOY_SSH_KEY}" ]; then
+            echo "DEPLOY_SSH_KEY secret is empty. Add the private SSH key to GitHub secrets."
+            exit 1
+          fi
+
           mkdir -p ~/.ssh
-          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 700 ~/.ssh
+          printf '%s\n' "${DEPLOY_SSH_KEY}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H "${{ secrets.DROPLET_HOST }}" >> ~/.ssh/known_hosts
+
+          if [ -n "${DROPLET_HOST}" ]; then
+            ssh-keyscan -H "${DROPLET_HOST}" >> ~/.ssh/known_hosts 2>/dev/null || true
+          fi
+          chmod 600 ~/.ssh/known_hosts 2>/dev/null || true
 
       - name: Deploy static site with rsync
+        env:
+          SSH_PORT: ${{ secrets.DROPLET_SSH_PORT || 22 }}
         run: |
+          set -euo pipefail
+
+          ssh -i ~/.ssh/deploy_key \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=accept-new \
+            -p "${SSH_PORT}" \
+            "${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_HOST }}" \
+            "echo SSH_OK" || {
+              echo "SSH authentication failed. Verify that the public key is installed on the server and that DEPLOY_SSH_KEY is correct."
+              exit 1
+            }
+
           rsync -avz --delete \
-            -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.DROPLET_SSH_PORT || 22 }}" \
+            -e "ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -p ${SSH_PORT}" \
             --exclude='.git' \
             --exclude='.github' \
             --exclude='README.md' \
