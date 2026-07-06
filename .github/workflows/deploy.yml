@@ -37,25 +37,32 @@ jobs:
           fi
           chmod 600 ~/.ssh/known_hosts 2>/dev/null || true
 
+          ssh-keygen -y -f ~/.ssh/deploy_key >/tmp/deploy_key.pub 2>/dev/null || {
+            echo "The private key in DEPLOY_SSH_KEY is invalid or not in a supported format."
+            exit 1
+          }
+
+          eval "$(ssh-agent -s)"
+          ssh-add ~/.ssh/deploy_key
+
       - name: Deploy static site with rsync
         env:
           SSH_PORT: ${{ secrets.DROPLET_SSH_PORT || 22 }}
         run: |
           set -euo pipefail
 
-          ssh -i ~/.ssh/deploy_key \
-            -o BatchMode=yes \
+          ssh -o BatchMode=yes \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=accept-new \
             -p "${SSH_PORT}" \
             "${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_HOST }}" \
             "echo SSH_OK" || {
-              echo "SSH authentication failed. Verify that the public key is installed on the server and that DEPLOY_SSH_KEY is correct."
+              echo "SSH authentication failed. Verify that the public key is installed on the server and that DEPLOY_SSH_KEY matches the server user."
               exit 1
             }
 
           rsync -avz --delete \
-            -e "ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -p ${SSH_PORT}" \
+            -e "ssh -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -p ${SSH_PORT}" \
             --exclude='.git' \
             --exclude='.github' \
             --exclude='README.md' \
